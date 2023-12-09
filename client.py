@@ -58,11 +58,11 @@ def draw(surface, players, snacks):
         color = rgb_colors_list[i % len(rgb_colors_list)]
         draw_things(surface, player, color=color, eye=True)
     draw_things(surface, snacks, (0, 255, 0))
-    pygame.display.update()
+    pygame.display.flip()
 
 
 def main():
-    win = pygame.display.set_mode((width, height))
+    win = pygame.display.set_mode((width, height), pygame.DOUBLEBUF)
 
     n = Network()
 
@@ -96,31 +96,35 @@ def main():
 
         snacks, players = [], []
         if pos is not None:
-            raw_players = pos.split("|")[0].split("**")
-            raw_snacks = pos.split("|")[1].split("**")
 
-            if raw_players == '':
-                pass
-            else:
-                for raw_player in raw_players:
-                    raw_positions = raw_player.split("*")
-                    if len(raw_positions) == 0:
-                        continue
+            try:
+                raw_players = pos.split("|")[0].split("**")
+                raw_snacks = pos.split("|")[1].split("**")
 
-                    positions = []
-                    for raw_position in raw_positions:
-                        if raw_position == "":
+                if raw_players == '':
+                    pass
+                else:
+                    for raw_player in raw_players:
+                        raw_positions = raw_player.split("*")
+                        if len(raw_positions) == 0:
                             continue
-                        nums = raw_position.split(')')[0].split('(')[1].split(',')
-                        positions.append((int(nums[0]), int(nums[1])))
-                    players.append(positions)
 
-            if len(raw_snacks) == 0:
-                continue
+                        positions = []
+                        for raw_position in raw_positions:
+                            if raw_position == "":
+                                continue
+                            nums = raw_position.split(')')[0].split('(')[1].split(',')
+                            positions.append((int(nums[0]), int(nums[1])))
+                        players.append(positions)
 
-            for i in range(len(raw_snacks)):
-                nums = raw_snacks[i].split(')')[0].split('(')[1].split(',')
-                snacks.append((int(nums[0]), int(nums[1])))
+                if len(raw_snacks) == 0:
+                    continue
+
+                for i in range(len(raw_snacks)):
+                    nums = raw_snacks[i].split(')')[0].split('(')[1].split(',')
+                    snacks.append((int(nums[0]), int(nums[1])))
+            except:
+                print("Encountered an error for the position:", pos)
 
         draw(win, players, snacks)
 

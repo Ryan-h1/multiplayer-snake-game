@@ -30,6 +30,37 @@ interval = 0.2
 moves_queue = set()
 
 
+def client_thread(conn, unique_id):
+    global game, moves_queue, game_state
+
+    conn.send(str.encode(unique_id))
+    while True:
+        try:
+            data = conn.recv(2048).decode()
+            conn.send(game_state.encode())
+            if not data:
+                print("no data received from client")
+                break
+            elif data == "quit":
+                print("received quit")
+                game.remove_player(unique_id)
+                break
+            elif data == "reset":
+                game.reset_player(unique_id)
+            elif data in ["up", "down", "left", "right"]:
+                move = data
+                moves_queue.add((unique_id, move))
+            else:
+                print("Invalid data received from client:", data)
+        except:
+            print("Player {} disconnected".format(unique_id))
+            break
+
+    print("Connection with Player {} closed".format(unique_id))
+    game.remove_player(unique_id)
+    conn.close()
+
+
 def game_thread():
     global game, moves_queue, game_state
     while True:
@@ -54,41 +85,17 @@ rgb_colors_list = list(rgb_colors.values())
 def main():
     global counter, game
 
-    conn, addr = s.accept()
-    print("Connected to:", addr)
-
-    unique_id = str(uuid.uuid4())
-    color = rgb_colors_list[np.random.randint(0, len(rgb_colors_list))]
-    game.add_player(unique_id, color=color)
-
     start_new_thread(game_thread, ())
 
     while True:
-        data = conn.recv(500).decode()
-        conn.send(game_state.encode())
+        conn, addr = s.accept()
+        print("Connected to:", addr)
 
-        move = None
-        if not data:
-            print("no data received from client")
-            break
-        elif data == "control:get":
-            print("received control:get")
-            pass
-        elif data == "get":
-            print("received get")
-            pass
-        elif data == "quit":
-            print("received quit")
-            game.remove_player(unique_id)
-            break
-        elif data == "reset":
-            game.reset_player(unique_id)
+        unique_id = str(uuid.uuid4())
+        color = rgb_colors_list[np.random.randint(0, len(rgb_colors_list))]
+        game.add_player(unique_id, color=color)
 
-        elif data in ["up", "down", "left", "right"]:
-            move = data
-            moves_queue.add((unique_id, move))
-        else:
-            print("Invalid data received from client:", data)
+        start_new_thread(client_thread, (conn, unique_id))
 
     conn.close()
 
