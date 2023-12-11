@@ -3,42 +3,49 @@ import pygame
 from network import Network
 import time
 
-width = 500
-height = 500
-rows = 20
-
-rgb_colors = {
+WIDTH = 500
+HEIGHT = 500
+ROWS = 20
+RGB_COLORS = {
     "red": (255, 0, 0),
     "green": (0, 255, 0),
     "blue": (0, 0, 255),
     "yellow": (255, 255, 0),
     "orange": (255, 165, 0),
 }
-rgb_colors_list = list(rgb_colors.values())
-
+RGB_COLOR_LIST = list(RGB_COLORS.values())
+PREDEFINED_MESSAGES = {
+    pygame.K_z: "Congratulations!",
+    pygame.K_x: "It works!",
+    pygame.K_c: "Ready?"
+}
+KEYS = {
+    pygame.K_LEFT: "left",
+    pygame.K_RIGHT: "right",
+    pygame.K_UP: "up",
+    pygame.K_DOWN: "down",
+    pygame.K_SPACE: "reset",
+}
 
 def draw_grid(w, surface):
-    global rows
-    sizeBtwn = w // rows
-
+    global ROWS
+    sizeBtwn = w // ROWS
     x = 0
     y = 0
-    for l in range(rows):
+    for l in range(ROWS):
         x = x + sizeBtwn
         y = y + sizeBtwn
-
         pygame.draw.line(surface, (255, 255, 255), (x, 0), (x, w))
         pygame.draw.line(surface, (255, 255, 255), (0, y), (w, y))
 
 
 def draw_things(surface, positions, color=None, eye=False):
-    global width, rgb_colors_list
-    dis = width // rows
+    global WIDTH, RGB_COLOR_LIST
+    dis = WIDTH // ROWS
     if color is None:
         color = (np.random.randint(0, 255), np.random.randint(0, 255), np.random.randint(0, 255))
     for pos_id, pos in enumerate(positions):
         i, j = pos
-
         pygame.draw.rect(surface, color, (i * dis + 1, j * dis + 1, dis - 2, dis - 2))
         if eye and pos_id == 0:
             centre = dis // 2
@@ -50,57 +57,62 @@ def draw_things(surface, positions, color=None, eye=False):
 
 
 def draw(surface, players, snacks):
-    global rgb_colors_list
-
+    global RGB_COLOR_LIST
     surface.fill((0, 0, 0))
-    draw_grid(width, surface)
+    draw_grid(WIDTH, surface)
     for i, player in enumerate(players):
-        color = rgb_colors_list[i % len(rgb_colors_list)]
+        color = RGB_COLOR_LIST[i % len(RGB_COLOR_LIST)]
         draw_things(surface, player, color=color, eye=True)
     draw_things(surface, snacks, (0, 255, 0))
     pygame.display.flip()
 
 
-def main():
-    win = pygame.display.set_mode((width, height), pygame.DOUBLEBUF)
+class GameClient:
+    def __init__(self):
+        pygame.init()
+        self.win = pygame.display.set_mode((WIDTH, HEIGHT), pygame.DOUBLEBUF)
+        self.network = Network()
+        self.shouldRun = True
+        self.run()
 
-    n = Network()
+    def run(self):
+        while self.shouldRun:
+            events = pygame.event.get()
+            server_response = self.handle_events(events)
+            pos = self.handle_server_response(server_response)
+            if pos:
+                snacks, players = self.parse_pos(pos)
+                draw(self.win, players, snacks)
+        pygame.quit()
 
-    flag = True
-
-    while flag:
-
-        events = pygame.event.get()
-        pos = None
-        if len(events) > 0:
-
-            for event in events:
-                if event.type == pygame.QUIT:
-                    flag = False
-                    pos = n.send("quit", receive=True)
-                    pygame.quit()
-
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_LEFT:
-                        pos = n.send("left", receive=True)
-                    elif event.key == pygame.K_RIGHT:
-                        pos = n.send("right", receive=True)
-                    elif event.key == pygame.K_UP:
-                        pos = n.send("up", receive=True)
-                    elif event.key == pygame.K_DOWN:
-                        pos = n.send("down", receive=True)
-                    elif event.key == pygame.K_SPACE:
-                        pos = n.send("reset", receive=True)
+    def handle_server_response(self, server_response):
+        if server_response is None:
+            return None
         else:
-            pos = n.send("control:get", receive=True)
+            return server_response
 
+    def handle_events(self, events):
+        for event in events:
+            if event.type == pygame.QUIT:
+                self.shouldRun = False
+                return self.network.send("quit", receive=True)
+            if event.type == pygame.KEYDOWN:
+                return self.get_key_input(event)
+        return self.network.send("control:get", receive=True)
+
+    def get_key_input(self, event):
+        if event.key in KEYS:
+            return self.network.send(KEYS[event.key], receive=True)
+        elif event.key in PREDEFINED_MESSAGES:
+            return self.network.send(PREDEFINED_MESSAGES[event.key], receive=True)
+        return None
+
+    def parse_pos(self, pos):
         snacks, players = [], []
         if pos is not None:
-
             try:
                 raw_players = pos.split("|")[0].split("**")
                 raw_snacks = pos.split("|")[1].split("**")
-
                 if raw_players == '':
                     pass
                 else:
@@ -116,17 +128,16 @@ def main():
                             nums = raw_position.split(')')[0].split('(')[1].split(',')
                             positions.append((int(nums[0]), int(nums[1])))
                         players.append(positions)
-
-                if len(raw_snacks) == 0:
-                    continue
-
                 for i in range(len(raw_snacks)):
                     nums = raw_snacks[i].split(')')[0].split('(')[1].split(',')
                     snacks.append((int(nums[0]), int(nums[1])))
             except:
                 print("Encountered an error for the position:", pos)
+        return snacks, players
 
-        draw(win, players, snacks)
+
+def main():
+    GameClient()
 
 
 if __name__ == "__main__":
