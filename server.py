@@ -87,20 +87,22 @@ class GameServer:
 
     def receive(self, conn):
         try:
-            # First, receive the length of the message
-            length_prefix = conn.recv(4)
-            if not length_prefix:
+            # Receive the length of the encrypted message
+            encrypted_length_prefix = conn.recv(4)
+            if not encrypted_length_prefix:
                 return None
-            message_length = int.from_bytes(length_prefix, byteorder='big')
+            encrypted_message_length = int.from_bytes(encrypted_length_prefix, byteorder='big')
 
-            # Now receive the actual message
-            full_message = b''
-            while len(full_message) < message_length:
-                packet = conn.recv(message_length - len(full_message))
+            # Now receive the actual encrypted message
+            encrypted_message = b''
+            while len(encrypted_message) < encrypted_message_length:
+                packet = conn.recv(encrypted_message_length - len(encrypted_message))
                 if not packet:
                     return None
-                full_message += packet
-            return full_message.decode()
+                encrypted_message += packet
+
+            # Decrypt the message after receiving the full encrypted message
+            return self.decrypt_message(encrypted_message)
         except Exception as e:
             print("Error receiving data: {}".format(e))
             return None
