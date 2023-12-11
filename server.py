@@ -5,6 +5,12 @@ import pickle
 from snake import SnakeGame
 import uuid
 import time
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
+import base64
 
 SERVER = "localhost"
 PORT = 5555
@@ -34,6 +40,13 @@ class GameServer:
         self.game_state = ""
         self.moves_queue = set()
         self.player_connections = {}
+        # RSA Key Generation
+        self.private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        self.public_key = self.private_key.public_key()
         print("Waiting for a connection, Server Started")
 
     def run(self):
@@ -46,21 +59,69 @@ class GameServer:
             self.game.add_player(unique_id, color=color)
             start_new_thread(self.client_thread, (conn, unique_id))
 
+    def send(self, conn, message):
+        # Encode the message and prepend length
+        encoded_message = message.encode()
+        message_length = len(encoded_message)
+        length_prefix = message_length.to_bytes(4, byteorder='big')
+        full_message = length_prefix + encoded_message
+        conn.sendall(full_message)
+
+    def decrypt_message(self, encrypted_message):
+        decrypted_message = self.private_key.decrypt(
+            base64.b64decode(encrypted_message),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        return decrypted_message.decode()
+
+    def serialize_public_key(self):
+        public_key = self.public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        return public_key.decode('utf-8')
+
+    def receive(self, conn):
+        try:
+            # First, receive the length of the message
+            length_prefix = conn.recv(4)
+            if not length_prefix:
+                return None
+            message_length = int.from_bytes(length_prefix, byteorder='big')
+
+            # Now receive the actual message
+            full_message = b''
+            while len(full_message) < message_length:
+                packet = conn.recv(message_length - len(full_message))
+                if not packet:
+                    return None
+                full_message += packet
+            return full_message.decode()
+        except Exception as e:
+            print("Error receiving data: {}".format(e))
+            return None
+
     def broadcast_message(self, sender_id, message):
         for player_id in self.game.players:
             if player_id != sender_id:
                 try:
                     player_conn = self.player_connections[player_id]
-                    player_conn.send("{}: {}".format(sender_id, player_id).encode())
+                    self.send(player_conn, "chat:{}: {}".format(sender_id, message))
                 except Exception as e:
                     print("Error broadcasting message to player {}: {}".format(player_id, e))
 
     def client_thread(self, conn, unique_id):
         self.player_connections[unique_id] = conn
+        public_key_str = self.serialize_public_key()
+        self.send(conn, public_key_str) # Send public key to client
         while True:
             try:
-                data = conn.recv(BUFFER_SIZE).decode()
-                conn.send(self.game_state.encode())
+                data = self.receive(conn)
+                self.send(conn, "pos:{}".format(self.game_state))
                 if not data:
                     print("no data received from client")
                     break
@@ -73,11 +134,11 @@ class GameServer:
                 elif data in ["up", "down", "left", "right"]:
                     move = data
                     self.moves_queue.add((unique_id, move))
-                elif data != "control:get":
-                    print("Invalid data received from client:", data)
-                if data.startswith("chat:"):
+                elif data.startswith("chat:"):
                     message = data.split(":", 1)[1]
                     self.broadcast_message(unique_id, message)
+                elif data != "control:get":
+                    print("Invalid data received from client:", data)
             except:
                 print("Player {} disconnected".format(unique_id))
                 break

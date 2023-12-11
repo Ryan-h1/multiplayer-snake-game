@@ -1,7 +1,10 @@
 import numpy as np
 import pygame
 from network import Network
-import time
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+import base64
 
 WIDTH = 500
 HEIGHT = 500
@@ -88,8 +91,15 @@ class GameClient:
     def handle_server_response(self, server_response):
         if server_response is None:
             return None
-        else:
-            return server_response
+        pos_data = None
+        if "chat:" in server_response:
+            parts = server_response.split("chat:")
+            chat_message = parts[1].split("pos:")[0] if "pos:" in parts[1] else parts[1]
+            print(chat_message)
+        if "pos:" in server_response:
+            parts = server_response.split("pos:")
+            pos_data = parts[1].split("chat:")[0] if "chat:" in parts[1] else parts[1]
+        return pos_data.strip() if pos_data else None
 
     def handle_events(self, events):
         for event in events:
@@ -104,7 +114,7 @@ class GameClient:
         if event.key in KEYS:
             return self.network.send(KEYS[event.key], receive=True)
         elif event.key in PREDEFINED_MESSAGES:
-            return self.network.send(PREDEFINED_MESSAGES[event.key], receive=True)
+            return self.network.send("chat:{}".format(PREDEFINED_MESSAGES[event.key]), receive=True)
         return None
 
     def parse_pos(self, pos):
