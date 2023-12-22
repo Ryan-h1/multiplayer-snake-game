@@ -27,6 +27,8 @@ class Network:
     def connect(self):
         try:
             self.client.connect(self.addr)
+            public_key_str = self.serialize_public_key()
+            self.client.sendall(public_key_str.encode())
             # Receive and set up public key
             public_key_str = self.receive()
             self.server_public_key = load_pem_public_key(
@@ -46,6 +48,17 @@ class Network:
             )
         )
         return base64.b64encode(encrypted_message)
+
+    def decrypt_message(self, encrypted_message):
+        decrypted_message = self.private_key.decrypt(
+            base64.b64decode(encrypted_message),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        return decrypted_message.decode()
 
     def serialize_public_key(self):
         public_key = self.public_key.public_bytes(
@@ -85,7 +98,16 @@ class Network:
                 if not packet:
                     return None
                 full_message += packet
-            return full_message.decode()
+
+            # Check for "encrypted:" tag
+            if full_message.startswith(b'encrypted:'):
+                # Remove the "encrypted:" tag and decrypt the remaining message
+                encrypted_message = full_message[len(b'encrypted:'):]
+                message = self.decrypt_message(encrypted_message)
+                return message
+            else:
+                # If not encrypted, just decode the message
+                return full_message.decode()
         except socket.error as e:
             print("Socket error: {}".format(e))
             return None
