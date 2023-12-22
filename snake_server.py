@@ -1,10 +1,14 @@
+"""
+This is the server for the multiplayer snake game.
+"""
+
 import numpy as np
 import socket
 from _thread import *
-import pickle
-from snake import SnakeGame
+from Snake import SnakeGame
 import uuid
 import time
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
@@ -29,6 +33,10 @@ RGB_COLORS_LIST = list(RGB_COLORS.values())
 
 
 class GameServer:
+    """
+    This is the game server object for the multiplayer snake game.
+    """
+
     def __init__(self, host, port):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -67,6 +75,33 @@ class GameServer:
         full_message = length_prefix + encoded_message
         conn.sendall(full_message)
 
+    def send_encrypted(self, conn, public_key, message):
+        try:
+            # Encrypt the message
+            encrypted_message = self.encrypt_message(public_key, message.encode())
+            encrypted_length = len(encrypted_message)
+            # Add the "encrypted" tag
+            encrypted_tag = "encrypted:".encode()
+            total_length = encrypted_length + len(encrypted_tag)
+            # Prepend length prefix and the "encrypted" tag
+            length_prefix = total_length.to_bytes(4, byteorder='big')
+            full_message = length_prefix + encrypted_tag + encrypted_message
+            # Send the final message
+            conn.sendall(full_message)
+        except Exception as e:
+            print("Error sending encrypted message: {}".format(e))
+
+    def encrypt_message(self, public_key, message):
+        encrypted_message = public_key.encrypt(
+            message,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        return base64.b64encode(encrypted_message)
+
     def decrypt_message(self, encrypted_message):
         decrypted_message = self.private_key.decrypt(
             base64.b64decode(encrypted_message),
@@ -87,20 +122,22 @@ class GameServer:
 
     def receive(self, conn):
         try:
-            # First, receive the length of the message
-            length_prefix = conn.recv(4)
-            if not length_prefix:
+            # Receive the length of the encrypted message
+            encrypted_length_prefix = conn.recv(4)
+            if not encrypted_length_prefix:
                 return None
-            message_length = int.from_bytes(length_prefix, byteorder='big')
+            encrypted_message_length = int.from_bytes(encrypted_length_prefix, byteorder='big')
 
-            # Now receive the actual message
-            full_message = b''
-            while len(full_message) < message_length:
-                packet = conn.recv(message_length - len(full_message))
+            # Now receive the actual encrypted message
+            encrypted_message = b''
+            while len(encrypted_message) < encrypted_message_length:
+                packet = conn.recv(encrypted_message_length - len(encrypted_message))
                 if not packet:
                     return None
-                full_message += packet
-            return full_message.decode()
+                encrypted_message += packet
+
+            # Decrypt the message after receiving the full encrypted message
+            return self.decrypt_message(encrypted_message)
         except Exception as e:
             print("Error receiving data: {}".format(e))
             return None
@@ -109,15 +146,21 @@ class GameServer:
         for player_id in self.game.players:
             if player_id != sender_id:
                 try:
-                    player_conn = self.player_connections[player_id]
-                    self.send(player_conn, "chat:{}: {}".format(sender_id, message))
+                    player_conn, player_key = self.player_connections[player_id]
+                    self.send_encrypted(player_conn, player_key, "chat:{}: {}".format(sender_id, message))
                 except Exception as e:
                     print("Error broadcasting message to player {}: {}".format(player_id, e))
 
     def client_thread(self, conn, unique_id):
-        self.player_connections[unique_id] = conn
+        client_public_key_str = conn.recv(1024).decode()
+        client_public_key = load_pem_public_key(
+            client_public_key_str.encode(),
+            backend=default_backend()
+        )
+        # Store the connection and public key
+        self.player_connections[unique_id] = (conn, client_public_key)
         public_key_str = self.serialize_public_key()
-        self.send(conn, public_key_str) # Send public key to client
+        self.send(conn, public_key_str)  # Send public key to client
         while True:
             try:
                 data = self.receive(conn)
